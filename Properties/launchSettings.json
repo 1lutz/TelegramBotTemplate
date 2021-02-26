@@ -18,8 +18,7 @@
     },
     "TelegramBotTemplate": {
       "commandName": "Project",
-      "launchBrowser": true,
-      "launchUrl": "weatherforecast",
+      "launchUrl": "api/bot",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       },
