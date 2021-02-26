@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using TelegramBotTemplate.Models;
 using TelegramBotTemplate.Models.Replies;
@@ -20,6 +21,11 @@ namespace TelegramBotTemplate.Services
         private Task<IMessengerResponse> Pack(object response)
         {
             return response is Task<IMessengerResponse> t ? t : Task.FromResult((IMessengerResponse)response);
+        }
+
+        private string ToSnakeCase(string pascalCase)
+        {
+            return Regex.Replace(pascalCase, "(^|[a-z])[A-Z]", m => m.Length == 1 ? char.ToLower(m.Value[0]).ToString() : m.Value[0] + "\\_" + char.ToLower(m.Value[1]));
         }
 
         public AbstractDispatchingDialog()
@@ -41,10 +47,10 @@ namespace TelegramBotTemplate.Services
                 if (parameters.Length == 0 || parameters[0].ParameterType != typeof(User) || parameters.Skip(1).Any(o => o.ParameterType != typeof(string))) continue;
 
                 //Normalize method name
-                string name = method.Name.ToLower();
-                if (name.EndsWith("async")) name = name.Substring(0, name.Length - 5);
-                if (name.EndsWith("command")) name = name.Substring(0, name.Length - 7);
-                if (name.EndsWith("callback")) name = name.Substring(0, name.Length - 8);
+                string name = ToSnakeCase(method.Name);
+                if (name.EndsWith("async")) name = name.Substring(0, name.Length - 7);
+                if (name.EndsWith("command")) name = name.Substring(0, name.Length - 9);
+                if (name.EndsWith("callback")) name = name.Substring(0, name.Length - 10);
                 //Add method to dispatcher
                 _methods.Add(name, method);
 
