@@ -17,7 +17,7 @@ namespace TelegramBotTemplate.Services
 
         Task<ReplyInfo> EditMessageAsync(ReplyInfo reply, string newText, Keyboard newKeyboard);
 
-        Task DeleteMessageAsync(ReplyInfo reply);
+        Task DeleteMessageAsync(long chatId, int messageId);
 
         Task AnswerCallbackAsync(string callbackId);
 

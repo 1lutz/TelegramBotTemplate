@@ -89,9 +89,9 @@ namespace TelegramBotTemplate.Services
             return new ReplyInfo(chatId, m.MessageId, newKeyboard != null);
         }
 
-        public Task DeleteMessageAsync(ReplyInfo reply)
+        public Task DeleteMessageAsync(long chatId, int messageId)
         {
-            return _bot.DeleteMessageAsync(reply.UserID, reply.MessageID);
+            return _bot.DeleteMessageAsync(chatId, messageId);
         }
 
         public Task AnswerCallbackAsync(string callbackId)

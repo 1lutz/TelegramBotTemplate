@@ -6,12 +6,11 @@ using TelegramBotTemplate.Services;
 
 namespace TelegramBotTemplate.Models.Replies
 {
-    public class DeleteLastMessageReponse : IMessengerResponse
+    public class DeleteLastRequestResponse : IMessengerResponse
     {
         public async Task<ReplyInfo> SendReplyAsync(IMessengerService messenger, long chatId, ReplyInfo latestReply, int requestId)
         {
-            //return messenger.DeleteMessageAsync(latestReply, requestId);
-            await messenger.DeleteMessageAsync(latestReply);
+            await messenger.DeleteMessageAsync(chatId, latestReply.MessageID);
             return latestReply;
         }
     }

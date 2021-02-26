@@ -22,7 +22,7 @@ namespace TelegramBotTemplate.Services
 
         protected IMessengerResponse Nothing() => new EmptyMessageResponse();
 
-        protected IMessengerResponse DeleteLastMessage() => new DeleteLastMessageReponse();
+        protected IMessengerResponse DeleteLastRequest() => new DeleteLastRequestResponse();
 
         protected IMessengerResponse Combine(params IMessengerResponse[] replies) => new CombinedMessageResponse(replies);
     }
