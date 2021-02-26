@@ -10,7 +10,7 @@ namespace TelegramBotTemplate.Models.Replies
     {
         public async Task<ReplyInfo> SendReplyAsync(IMessengerService messenger, long chatId, ReplyInfo latestReply, int requestId)
         {
-            await messenger.DeleteMessageAsync(chatId, latestReply.MessageID);
+            await messenger.DeleteMessageAsync(chatId, requestId);
             return latestReply;
         }
     }
