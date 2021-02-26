@@ -4,7 +4,7 @@ using TelegramBotTemplate.Models.Replies;
 
 namespace TelegramBotTemplate.Services
 {
-    public abstract class AbstractMessengerDialog
+    public abstract class AbstractDialog
     {
         public abstract Task<IMessengerResponse> HandleCallbackAsync(Models.User user, string command, string[] args);
 

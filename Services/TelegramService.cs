@@ -16,9 +16,9 @@ namespace TelegramBotTemplate.Services
         private readonly MessengerOptions _options;
         private readonly TelegramBotClient _bot;
         private readonly IUserRegistry _userRegistry;
-        private readonly AbstractMessengerDialog _dialog;
+        private readonly AbstractDialog _dialog;
 
-        public TelegramService(IOptions<MessengerOptions> options, IUserRegistry userRegistry, AbstractMessengerDialog dialog)
+        public TelegramService(IOptions<MessengerOptions> options, IUserRegistry userRegistry, AbstractDialog dialog)
         {
             _options = options.Value;
             _bot = new TelegramBotClient(_options.ApiToken);
@@ -119,7 +119,14 @@ namespace TelegramBotTemplate.Services
             if (text[0] == '/')
             {
                 user.LastReply.HasKeyboard = false;
-                response = await _dialog.HandleCommandAsync(user, text.Substring(1));
+                int pos = text.IndexOf('@');
+
+                if (pos == -1)
+                    text = text.Substring(1);
+                else
+                    text = text.Substring(1, pos - 1);
+
+                response = await _dialog.HandleCommandAsync(user, text);
             }
             else
             {

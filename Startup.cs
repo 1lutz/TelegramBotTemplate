@@ -29,7 +29,7 @@ namespace TelegramBotTemplate
             services.Configure<MessengerOptions>(Configuration.GetSection("Messenger"));
             services.AddSingleton<IUserRegistry, UserRegistryInMemory>();
             services.AddSingleton<IMessengerService, TelegramService>();
-            services.AddTransient<AbstractMessengerDialog, HelloWorldDialog>();
+            services.AddTransient<AbstractDialog, HelloWorldDialog>();
             services.AddControllers();
         }
 

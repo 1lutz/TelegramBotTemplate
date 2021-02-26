@@ -7,32 +7,16 @@ using TelegramBotTemplate.Models.Replies;
 
 namespace TelegramBotTemplate.Services
 {
-    public class HelloWorldDialog : AbstractMessengerDialog
+    public class HelloWorldDialog : AbstractDispatchingDialog
     {
-        public override Task<IMessengerResponse> HandleCommandAsync(User user, string command)
+        public IMessengerResponse Start(User user)
         {
-            switch (command)
-            {
-                case "start":
-                    return Task.FromResult(Text($"Hello {user.Name}!"));
-
-                case "help":
-                    return Task.FromResult(Text(@"These are all available commands:
-/help - Shows this page"));
-
-                default:
-                    return Task.FromResult(Text("Unrecognized command. You can use /help to show all available commands."));
-            }
+            return Text($"Hello {user.Name}!");
         }
 
         public override Task<IMessengerResponse> HandleMessageAsync(User user, string text)
         {
             return Task.FromResult(Text("You said:\r\n" + text));
-        }
-
-        public override Task<IMessengerResponse> HandleCallbackAsync(User user, string command, string[] args)
-        {
-            return Task.FromResult(Nothing());
         }
     }
 }
