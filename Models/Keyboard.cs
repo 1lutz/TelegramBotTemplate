@@ -41,10 +41,6 @@ namespace TelegramBotTemplate.Models
             return this;
         }
 
-        public Keyboard AppendLine(string text, string callback) => Append(text, callback).AppendLine();
-
-        public Keyboard AppendLine(string text) => AppendLine(text, text);
-
         public InlineKeyboardMarkup Build()
         {
             _grid.Add(_row);

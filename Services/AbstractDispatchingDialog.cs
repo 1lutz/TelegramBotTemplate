@@ -119,4 +119,22 @@ namespace TelegramBotTemplate.Services
             }
         }
     }
+
+    public static class KeyboardExtensions
+    {
+        public static Keyboard Append(this Keyboard keyboard, string text, Func<User, string, IMessengerResponse> callback, string arg)
+        {
+            return keyboard.Append(text, callback.Method.Name + ";" + arg);
+        }
+
+        public static Keyboard Append(this Keyboard keyboard, string text, Func<User, string, string, IMessengerResponse> callback, string arg1, string arg2)
+        {
+            return keyboard.Append(text, callback.Method.Name + ";" + arg1 + ";" + arg2);
+        }
+
+        public static Keyboard Append(this Keyboard keyboard, string text, Func<User, string, string, string, IMessengerResponse> callback, string arg1, string arg2, string arg3)
+        {
+            return keyboard.Append(text, callback.Method.Name + ";" + arg1 + ";" + arg2 + ";" + arg3);
+        }
+    }
 }
