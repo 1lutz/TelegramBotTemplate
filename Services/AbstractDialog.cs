@@ -8,7 +8,7 @@ namespace TelegramBotTemplate.Services
     {
         public abstract Task<IMessengerResponse> HandleCallbackAsync(Models.User user, string command, string[] args);
 
-        public abstract Task<IMessengerResponse> HandleCommandAsync(Models.User user, string command);
+        public abstract Task<IMessengerResponse> HandleCommandAsync(Models.User user, string command, string[] args);
 
         public abstract Task<IMessengerResponse> HandleMessageAsync(Models.User user, string text);
 

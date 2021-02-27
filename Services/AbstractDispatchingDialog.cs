@@ -15,24 +15,36 @@ namespace TelegramBotTemplate.Services
     {
         private readonly Task<IMessengerResponse> UNKNOWN_COMMAND;
         private readonly Task<IMessengerResponse> UNKNOWN_CALLBACK;
-        private readonly Dictionary<string, MethodInfo> _methods;
+        private readonly Dictionary<string, MethodInfo> _commands;
+        private readonly Dictionary<string, MethodInfo> _callbacks;
         private readonly Task<IMessengerResponse> _helpText;
+
+        private string NormalizeMethodName(string name)
+        {
+            name = Regex.Replace(name, "(^|[a-z])[A-Z]", m => m.Length == 1 ? char.ToLower(m.Value[0]).ToString() : m.Value[0] + "\\_" + char.ToLower(m.Value[1]));
+            if (name.EndsWith("async")) name = name.Substring(0, name.Length - 7);
+            return name;
+        }
+
+        private object[] BuildMethodArgs(User user, string[] args)
+        {
+            object[] methodArgs = new object[args.Length + 1];
+            methodArgs[0] = user;
+            Array.Copy(args, 0, methodArgs, 1, args.Length);
+            return methodArgs;
+        }
 
         private Task<IMessengerResponse> Pack(object response)
         {
             return response is Task<IMessengerResponse> t ? t : Task.FromResult((IMessengerResponse)response);
         }
 
-        private string ToSnakeCase(string pascalCase)
-        {
-            return Regex.Replace(pascalCase, "(^|[a-z])[A-Z]", m => m.Length == 1 ? char.ToLower(m.Value[0]).ToString() : m.Value[0] + "\\_" + char.ToLower(m.Value[1]));
-        }
-
         public AbstractDispatchingDialog()
         {
             UNKNOWN_COMMAND = Task.FromResult(Text("Unrecognized command. You can use /help to show all available commands."));
             UNKNOWN_CALLBACK = Task.FromResult(Nothing());
-            _methods = new Dictionary<string, MethodInfo>();
+            _commands = new Dictionary<string, MethodInfo>();
+            _callbacks = new Dictionary<string, MethodInfo>();
             StringBuilder helpTextBuilder = new StringBuilder();
             helpTextBuilder.AppendLine("These are all available commands:");
             //Public instance methods, which are directly declared in a subclass
@@ -47,34 +59,43 @@ namespace TelegramBotTemplate.Services
                 if (parameters.Length == 0 || parameters[0].ParameterType != typeof(User) || parameters.Skip(1).Any(o => o.ParameterType != typeof(string))) continue;
 
                 //Normalize method name
-                string name = ToSnakeCase(method.Name);
-                if (name.EndsWith("async")) name = name.Substring(0, name.Length - 7);
-                if (name.EndsWith("command")) name = name.Substring(0, name.Length - 9);
-                if (name.EndsWith("callback")) name = name.Substring(0, name.Length - 10);
-                //Add method to dispatcher
-                _methods.Add(name, method);
+                string name = NormalizeMethodName(method.Name);
 
-                if (name != "start")
+                if (name.EndsWith("callback"))
                 {
-                    helpTextBuilder.Append('/').Append(name);
-                    DescriptionAttribute description = method.GetCustomAttribute<DescriptionAttribute>();
-                    if (description != null) helpTextBuilder.Append(" - ").Append(description.Description);
-                    helpTextBuilder.AppendLine();
+                    //Add callback to dispatcher
+                    name = name.Substring(0, name.Length - 10);
+                    _callbacks.Add(name, method);
+                }
+                else
+                {
+                    //Add command to dispatcher
+                    _commands.Add(name, method);
+
+                    if (name != "start")
+                    {
+                        //Generate help text for command
+                        helpTextBuilder.Append('/').Append(name);
+                        DescriptionAttribute description = method.GetCustomAttribute<DescriptionAttribute>();
+                        if (description != null) helpTextBuilder.Append(" - ").Append(description.Description);
+                        helpTextBuilder.AppendLine();
+                    }
                 }
             }
             helpTextBuilder.Append("/help - Shows this page");
             _helpText = Task.FromResult(Text(helpTextBuilder.ToString()));
         }
 
-        public override Task<IMessengerResponse> HandleCommandAsync(User user, string command)
+        public override Task<IMessengerResponse> HandleCommandAsync(User user, string command, string[] args)
         {
             if (command == "help")
             {
                 return _helpText;
             }
-            if (_methods.TryGetValue(command, out MethodInfo method))
+            if (_commands.TryGetValue(command, out MethodInfo method))
             {
-                return Pack(method.Invoke(this, new object[] { user }));
+                object[] methodArgs = BuildMethodArgs(user, args);
+                return Pack(method.Invoke(this, methodArgs));
             }
             else
             {
@@ -84,20 +105,12 @@ namespace TelegramBotTemplate.Services
 
         public override Task<IMessengerResponse> HandleCallbackAsync(User user, string command, string[] args)
         {
-            if (_methods.TryGetValue(command, out MethodInfo method))
-            {
-                object[] methodArgs;
+            command = NormalizeMethodName(command);
+            if (command.EndsWith("callback")) command = command.Substring(0, command.Length - 10);
 
-                if (args == null)
-                {
-                    methodArgs = new object[] { user };
-                }
-                else
-                {
-                    methodArgs = new object[args.Length + 1];
-                    methodArgs[0] = user;
-                    Array.Copy(args, 0, methodArgs, 1, args.Length);
-                }
+            if (_callbacks.TryGetValue(command, out MethodInfo method))
+            {
+                object[] methodArgs = BuildMethodArgs(user, args);
                 return Pack(method.Invoke(this, methodArgs));
             }
             else

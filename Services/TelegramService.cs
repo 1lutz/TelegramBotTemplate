@@ -104,6 +104,24 @@ namespace TelegramBotTemplate.Services
             return _bot.SendTextMessageAsync(_options.OwnerID, "System message:\r\n" + text, disableNotification: silent);
         }
 
+        private string ParseCommand(string text, char separator, out string[] args)
+        {
+            int pos = text.IndexOf(separator);
+
+            if (pos != -1)
+            {
+                args = text.Substring(pos + 1).Split(separator);
+                text = text.Substring(0, pos);
+                pos = text.IndexOf('@');
+                if (pos != -1) text = text.Substring(0, pos);
+            }
+            else
+            {
+                args = Array.Empty<string>();
+            }
+            return text;
+        }
+
         private async Task HandleMessageAsync(Message message)
         {
             long chatId = message.Chat.Id;
@@ -119,14 +137,9 @@ namespace TelegramBotTemplate.Services
             if (text[0] == '/')
             {
                 user.LastReply.HasKeyboard = false;
-                int pos = text.IndexOf('@');
-
-                if (pos == -1)
-                    text = text.Substring(1);
-                else
-                    text = text.Substring(1, pos - 1);
-
-                response = await _dialog.HandleCommandAsync(user, text);
+                string[] args;
+                string command = ParseCommand(text.Substring(1), ' ', out args);
+                response = await _dialog.HandleCommandAsync(user, command, args);
             }
             else
             {
@@ -142,15 +155,8 @@ namespace TelegramBotTemplate.Services
             Models.User user = await _userRegistry.GetUserByChatIdAsync(chatId, callback.From.FirstName);
             user.LastReply.HasKeyboard = callback.Message.ReplyMarkup != null;
             user.LastReply.MessageID = callback.Message.MessageId;
-            string command = callback.Data;
-            string[] args = null;
-            int pos = command.IndexOf(';');
-
-            if (pos != -1)
-            {
-                command = command.Substring(0, pos);
-                args = command.Substring(pos + 1).Split(';');
-            }
+            string[] args;
+            string command = ParseCommand(callback.Data, ';', out args);
             IMessengerResponse response;
 
             try
