@@ -19,9 +19,9 @@ namespace TelegramBotTemplate.Services
         private readonly Dictionary<string, MethodInfo> _callbacks;
         private readonly Task<IMessengerResponse> _helpText;
 
-        private string NormalizeMethodName(string name)
+        private string NormalizeName(string name, string separator = "_")
         {
-            name = Regex.Replace(name, "(^|[a-z])[A-Z]", m => m.Length == 1 ? char.ToLower(m.Value[0]).ToString() : m.Value[0] + "_" + char.ToLower(m.Value[1]));
+            name = Regex.Replace(name, "(^|[a-z])[A-Z]", m => m.Length == 1 ? char.ToLower(m.Value[0]).ToString() : m.Value[0] + separator + char.ToLower(m.Value[1]));
             if (name.EndsWith("async")) name = name.Substring(0, name.Length - 6);
             return name;
         }
@@ -59,7 +59,7 @@ namespace TelegramBotTemplate.Services
                 if (parameters.Length == 0 || parameters[0].ParameterType != typeof(User) || parameters.Skip(1).Any(o => o.ParameterType != typeof(string))) continue;
 
                 //Normalize method name
-                string name = NormalizeMethodName(method.Name);
+                string name = NormalizeName(method.Name);
 
                 if (name.EndsWith("callback"))
                 {
@@ -79,7 +79,7 @@ namespace TelegramBotTemplate.Services
 
                         for (int x = 1; x < parameters.Length; ++x)
                         {
-                            helpTextBuilder.Append(" <").Append(parameters[x].Name).Append('>');
+                            helpTextBuilder.Append(" <").Append(NormalizeName(parameters[x].Name, " ")).Append('>');
                         }
                         DescriptionAttribute description = method.GetCustomAttribute<DescriptionAttribute>();
                         if (description != null) helpTextBuilder.Append(" - ").Append(description.Description);
@@ -123,7 +123,7 @@ namespace TelegramBotTemplate.Services
 
         public override Task<IMessengerResponse> HandleCallbackAsync(User user, string command, string[] args)
         {
-            command = NormalizeMethodName(command);
+            command = NormalizeName(command);
             if (command.EndsWith("callback")) command = command.Substring(0, command.Length - 9);
 
             if (_callbacks.TryGetValue(command, out MethodInfo method))
