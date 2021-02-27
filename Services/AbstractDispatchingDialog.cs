@@ -26,11 +26,11 @@ namespace TelegramBotTemplate.Services
             return name;
         }
 
-        private object[] BuildMethodArgs(User user, string[] args)
+        private object[] BuildMethodArgs(User user, string[] args, int length)
         {
-            object[] methodArgs = new object[args.Length + 1];
+            object[] methodArgs = new object[length + 1];
             methodArgs[0] = user;
-            Array.Copy(args, 0, methodArgs, 1, args.Length);
+            Array.Copy(args, 0, methodArgs, 1, length);
             return methodArgs;
         }
 
@@ -76,6 +76,11 @@ namespace TelegramBotTemplate.Services
                     {
                         //Generate help text for command
                         helpTextBuilder.Append('/').Append(name.Replace("_", "\\_"));
+
+                        for (int x = 1; x < parameters.Length; ++x)
+                        {
+                            helpTextBuilder.Append(" <").Append(parameters[x].Name).Append('>');
+                        }
                         DescriptionAttribute description = method.GetCustomAttribute<DescriptionAttribute>();
                         if (description != null) helpTextBuilder.Append(" - ").Append(description.Description);
                         helpTextBuilder.AppendLine();
@@ -94,7 +99,20 @@ namespace TelegramBotTemplate.Services
             }
             if (_commands.TryGetValue(command, out MethodInfo method))
             {
-                object[] methodArgs = BuildMethodArgs(user, args);
+                int paramCount = method.GetParameters().Length - 1;
+
+                if (args.Length < paramCount)
+                {
+                    switch (paramCount)
+                    {
+                        case 1:
+                            return Task.FromResult(Text("This command requires one parameter. Use /help to learn more."));
+
+                        default:
+                            return Task.FromResult(Text("This command requires " + paramCount + " parameters. Use /help to learn more."));
+                    }
+                }
+                object[] methodArgs = BuildMethodArgs(user, args, paramCount);
                 return Pack(method.Invoke(this, methodArgs));
             }
             else
@@ -110,7 +128,7 @@ namespace TelegramBotTemplate.Services
 
             if (_callbacks.TryGetValue(command, out MethodInfo method))
             {
-                object[] methodArgs = BuildMethodArgs(user, args);
+                object[] methodArgs = BuildMethodArgs(user, args, args.Length);
                 return Pack(method.Invoke(this, methodArgs));
             }
             else
