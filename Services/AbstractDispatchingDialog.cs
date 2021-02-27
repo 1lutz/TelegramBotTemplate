@@ -21,8 +21,8 @@ namespace TelegramBotTemplate.Services
 
         private string NormalizeMethodName(string name)
         {
-            name = Regex.Replace(name, "(^|[a-z])[A-Z]", m => m.Length == 1 ? char.ToLower(m.Value[0]).ToString() : m.Value[0] + "\\_" + char.ToLower(m.Value[1]));
-            if (name.EndsWith("async")) name = name.Substring(0, name.Length - 7);
+            name = Regex.Replace(name, "(^|[a-z])[A-Z]", m => m.Length == 1 ? char.ToLower(m.Value[0]).ToString() : m.Value[0] + "_" + char.ToLower(m.Value[1]));
+            if (name.EndsWith("async")) name = name.Substring(0, name.Length - 6);
             return name;
         }
 
@@ -64,7 +64,7 @@ namespace TelegramBotTemplate.Services
                 if (name.EndsWith("callback"))
                 {
                     //Add callback to dispatcher
-                    name = name.Substring(0, name.Length - 10);
+                    name = name.Substring(0, name.Length - 9);
                     _callbacks.Add(name, method);
                 }
                 else
@@ -75,7 +75,7 @@ namespace TelegramBotTemplate.Services
                     if (name != "start")
                     {
                         //Generate help text for command
-                        helpTextBuilder.Append('/').Append(name);
+                        helpTextBuilder.Append('/').Append(name.Replace("_", "\\_"));
                         DescriptionAttribute description = method.GetCustomAttribute<DescriptionAttribute>();
                         if (description != null) helpTextBuilder.Append(" - ").Append(description.Description);
                         helpTextBuilder.AppendLine();
@@ -106,7 +106,7 @@ namespace TelegramBotTemplate.Services
         public override Task<IMessengerResponse> HandleCallbackAsync(User user, string command, string[] args)
         {
             command = NormalizeMethodName(command);
-            if (command.EndsWith("callback")) command = command.Substring(0, command.Length - 10);
+            if (command.EndsWith("callback")) command = command.Substring(0, command.Length - 9);
 
             if (_callbacks.TryGetValue(command, out MethodInfo method))
             {
