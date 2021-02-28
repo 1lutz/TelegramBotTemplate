@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
@@ -13,11 +14,20 @@ namespace TelegramBotTemplate.Services
 {
     public abstract class AbstractDispatchingDialog : AbstractDialog
     {
-        private readonly Task<IMessengerResponse> UNKNOWN_COMMAND;
-        private readonly Task<IMessengerResponse> UNKNOWN_CALLBACK;
+        private readonly ILogger _logger;
+        private readonly Dictionary<Type, TypeConverter> _converters;
         private readonly Dictionary<string, MethodInfo> _commands;
         private readonly Dictionary<string, MethodInfo> _callbacks;
         private readonly Task<IMessengerResponse> _helpText;
+
+        private bool TryAddConverter(Type destinationType)
+        {
+            if (_converters.ContainsKey(destinationType)) return true;
+            TypeConverter converter = TypeDescriptor.GetConverter(destinationType);
+            if (!converter.CanConvertFrom(typeof(string))) return false;
+            _converters.Add(destinationType, converter);
+            return true;
+        }
 
         private string NormalizeName(string name, string separator = "_")
         {
@@ -26,23 +36,51 @@ namespace TelegramBotTemplate.Services
             return name;
         }
 
-        private object[] BuildMethodArgs(User user, string[] args, int length)
-        {
-            object[] methodArgs = new object[length + 1];
-            methodArgs[0] = user;
-            Array.Copy(args, 0, methodArgs, 1, length);
-            return methodArgs;
-        }
-
         private Task<IMessengerResponse> Pack(object response)
         {
             return response is Task<IMessengerResponse> t ? t : Task.FromResult((IMessengerResponse)response);
         }
 
-        public AbstractDispatchingDialog()
+        private Task<IMessengerResponse> InvokeMethodAsync(MethodInfo method, User user, string[] args, out bool isError)
         {
-            UNKNOWN_COMMAND = Task.FromResult(Text("Unrecognized command. You can use /help to show all available commands."));
-            UNKNOWN_CALLBACK = Task.FromResult(Nothing());
+            isError = true;
+            ParameterInfo[] paramInfos = method.GetParameters();
+            int paramCount = paramInfos.Length - 1;
+
+            if (args.Length < paramCount)
+            {
+                switch (paramCount)
+                {
+                    case 1:
+                        return Task.FromResult(Text("This command requires _one parameter_. Use /help to learn more."));
+
+                    default:
+                        return Task.FromResult(Text("This command requires _" + paramCount + " parameters_. Use /help to learn more."));
+                }
+            }
+            object[] methodArgs = new object[paramInfos.Length];
+            methodArgs[0] = user;
+
+            for (int x = 1; x < paramInfos.Length; ++x)
+            {
+                try
+                {
+                    methodArgs[x] = _converters[paramInfos[x].ParameterType].ConvertFromString(args[0]);
+                }
+                catch (ArgumentException)
+                {
+                    return Task.FromResult(Text("The parameter `" + NormalizeName(paramInfos[x].Name, "_") + "` has invalid data. Use /help to learn more."));
+                }
+            }
+            isError = false;
+            object res = method.Invoke(this, methodArgs);
+            return res is Task<IMessengerResponse> t ? t : Task.FromResult((IMessengerResponse)res);
+        }
+
+        public AbstractDispatchingDialog(ILogger<AbstractDispatchingDialog> logger)
+        {
+            _logger = logger;
+            _converters = new Dictionary<Type, TypeConverter>();
             _commands = new Dictionary<string, MethodInfo>();
             _callbacks = new Dictionary<string, MethodInfo>();
             StringBuilder helpTextBuilder = new StringBuilder();
@@ -54,9 +92,25 @@ namespace TelegramBotTemplate.Services
             {
                 //Has return type IMessengerResponse or Task<IMessengerResponse> and does not override something
                 if (method.IsVirtual || (method.ReturnType != typeof(IMessengerResponse) && method.ReturnType != typeof(Task<IMessengerResponse>))) continue;
-                //First parameter must have type User and the other string
-                ParameterInfo[] parameters = method.GetParameters();
-                if (parameters.Length == 0 || parameters[0].ParameterType != typeof(User) || parameters.Skip(1).Any(o => o.ParameterType != typeof(string))) continue;
+                //First parameter must have type User
+                ParameterInfo[] paramInfos = method.GetParameters();
+                bool paramValidationError = false;
+
+                if (paramInfos.Length == 0 || paramInfos[0].ParameterType != typeof(User))
+                {
+                    paramValidationError = true;
+                    logger.LogError("Failed to register command \"{Command}\": The first parameter must be of type User.", method.Name);
+                }
+                //Ensure other parameters can be parsed
+                for (int x = 1; x < paramInfos.Length; ++x)
+                {
+                    if (!TryAddConverter(paramInfos[x].ParameterType))
+                    {
+                        paramValidationError = true;
+                        logger.LogError("Failed to register command \"{Command}\": Parameters of type {ParamType} are not allowed.", method.Name, paramInfos[x].ParameterType.Name);
+                    }
+                }
+                if (paramValidationError) continue;
 
                 //Normalize method name
                 string name = NormalizeName(method.Name);
@@ -77,9 +131,9 @@ namespace TelegramBotTemplate.Services
                         //Generate help text for command
                         helpTextBuilder.Append('/').Append(name.Replace("_", "\\_"));
 
-                        for (int x = 1; x < parameters.Length; ++x)
+                        for (int x = 1; x < paramInfos.Length; ++x)
                         {
-                            helpTextBuilder.Append(" <").Append(NormalizeName(parameters[x].Name, " ")).Append('>');
+                            helpTextBuilder.Append(" <").Append(NormalizeName(paramInfos[x].Name, " ")).Append('>');
                         }
                         DescriptionAttribute description = method.GetCustomAttribute<DescriptionAttribute>();
                         if (description != null) helpTextBuilder.Append(" - ").Append(description.Description);
@@ -99,26 +153,9 @@ namespace TelegramBotTemplate.Services
             }
             if (_commands.TryGetValue(command, out MethodInfo method))
             {
-                int paramCount = method.GetParameters().Length - 1;
-
-                if (args.Length < paramCount)
-                {
-                    switch (paramCount)
-                    {
-                        case 1:
-                            return Task.FromResult(Text("This command requires one parameter. Use /help to learn more."));
-
-                        default:
-                            return Task.FromResult(Text("This command requires " + paramCount + " parameters. Use /help to learn more."));
-                    }
-                }
-                object[] methodArgs = BuildMethodArgs(user, args, paramCount);
-                return Pack(method.Invoke(this, methodArgs));
+                return InvokeMethodAsync(method, user, args, out _);
             }
-            else
-            {
-                return UNKNOWN_COMMAND;
-            }
+            return Task.FromResult(Text("Unrecognized command. You can use /help to show all available commands."));
         }
 
         public override Task<IMessengerResponse> HandleCallbackAsync(User user, string command, string[] args)
@@ -128,29 +165,35 @@ namespace TelegramBotTemplate.Services
 
             if (_callbacks.TryGetValue(command, out MethodInfo method))
             {
-                object[] methodArgs = BuildMethodArgs(user, args, args.Length);
-                return Pack(method.Invoke(this, methodArgs));
+                bool isError;
+                var res = InvokeMethodAsync(method, user, args, out isError);
+
+                if (isError)
+                    _logger.LogWarning("Failed to invoke callback \"{Callback}\": {Message} Args: {Args}", method.Name, res.Result, string.Join(';', args));
+                else
+                    return res;
             }
             else
             {
-                return UNKNOWN_CALLBACK;
+                _logger.LogWarning("Tried to invoke the non-existent callback \"{Callback}\".", command);
             }
+            return Task.FromResult(Nothing());
         }
     }
 
     public static class KeyboardExtensions
     {
-        public static Keyboard Append(this Keyboard keyboard, string text, Func<User, string, IMessengerResponse> callback, string arg)
+        public static Keyboard Append<T>(this Keyboard keyboard, string text, Func<User, T, IMessengerResponse> callback, T arg)
         {
             return keyboard.Append(text, callback.Method.Name + ";" + arg);
         }
 
-        public static Keyboard Append(this Keyboard keyboard, string text, Func<User, string, string, IMessengerResponse> callback, string arg1, string arg2)
+        public static Keyboard Append<T1, T2>(this Keyboard keyboard, string text, Func<User, T1, T2, IMessengerResponse> callback, T1 arg1, T2 arg2)
         {
             return keyboard.Append(text, callback.Method.Name + ";" + arg1 + ";" + arg2);
         }
 
-        public static Keyboard Append(this Keyboard keyboard, string text, Func<User, string, string, string, IMessengerResponse> callback, string arg1, string arg2, string arg3)
+        public static Keyboard Append<T1, T2, T3>(this Keyboard keyboard, string text, Func<User, T1, T2, T3, IMessengerResponse> callback, T1 arg1, T2 arg2, T3 arg3)
         {
             return keyboard.Append(text, callback.Method.Name + ";" + arg1 + ";" + arg2 + ";" + arg3);
         }

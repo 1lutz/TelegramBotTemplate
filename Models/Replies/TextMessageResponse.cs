@@ -28,9 +28,9 @@ namespace TelegramBotTemplate.Models.Replies
             return messenger.SendTextMessageAsync(chatId, _text, _keyboard, _silent);
         }
 
-        public IMessengerResponse AsEditMessageResponse()
+        public override string ToString()
         {
-            return new EditMessageResponse(_text, _keyboard);
+            return _text;
         }
     }
 }

@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -9,6 +10,10 @@ namespace TelegramBotTemplate.Services
 {
     public class HelloWorldDialog : AbstractDispatchingDialog
     {
+        public HelloWorldDialog(ILogger<AbstractDispatchingDialog> logger) : base(logger)
+        {
+        }
+
         public IMessengerResponse Start(User user)
         {
             return Text($"Hello {user.Name}!");
