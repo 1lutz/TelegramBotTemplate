@@ -14,75 +14,140 @@ namespace TelegramBotTemplate.Services
 {
     public abstract class AbstractDispatchingDialog : AbstractDialog
     {
+        class CommandAdapter
+        {
+            private static readonly Dictionary<Type, TypeConverter> _converters = new Dictionary<Type, TypeConverter>();
+            private readonly AbstractDispatchingDialog _dialog;
+            private readonly MethodInfo _method;
+            private readonly ParameterInfo[] _paramInfos;
+            private readonly string[] _paramNames;
+
+            public string Name { get; }
+
+            public bool IsCallback { get; }
+
+            public string HelpText
+            {
+                get
+                {
+                    string s = "/" + Name.Replace("_", "\\_");
+
+                    for (int x = 1; x < _paramInfos.Length; ++x)
+                    {
+                        s += " <" + _paramNames[x] + ">";
+                    }
+                    DescriptionAttribute description = _method.GetCustomAttribute<DescriptionAttribute>();
+                    if (description != null) s += " - " + description.Description;
+                    return s;
+                }
+            }
+
+            private static bool TryAddConverter(Type destinationType)
+            {
+                if (_converters.ContainsKey(destinationType)) return true;
+                TypeConverter converter = TypeDescriptor.GetConverter(destinationType);
+                if (!converter.CanConvertFrom(typeof(string))) return false;
+                _converters.Add(destinationType, converter);
+                return true;
+            }
+
+            public static string NormalizeName(string name, string separator = "_")
+            {
+                name = Regex.Replace(name, "(^|[a-z])[A-Z]", m => m.Length == 1 ? char.ToLower(m.Value[0]).ToString() : m.Value[0] + separator + char.ToLower(m.Value[1]));
+                if (name.EndsWith("async")) name = name.Substring(0, name.Length - 6);
+                return name;
+            }
+
+            private CommandAdapter(AbstractDispatchingDialog dialog, MethodInfo method, ParameterInfo[] paramInfos)
+            {
+                _dialog = dialog;
+                _method = method;
+                _paramInfos = paramInfos;
+                Name = NormalizeName(method.Name);
+
+                if (Name.EndsWith("callback"))
+                {
+                    IsCallback = true;
+                    Name = Name.Substring(0, Name.Length - 9);
+                }
+                _paramNames = new string[paramInfos.Length];
+
+                for (int x = 0; x < paramInfos.Length; ++x)
+                {
+                    _paramNames[x] = NormalizeName(paramInfos[x].Name, " ");
+                }
+            }
+
+            public static CommandAdapter TryCreateCommandAdapter(AbstractDispatchingDialog dialog, ILogger logger, MethodInfo method)
+            {
+                //Has return type IMessengerResponse or Task<IMessengerResponse> and does not override something
+                if (method.IsVirtual || (method.ReturnType != typeof(IMessengerResponse) && method.ReturnType != typeof(Task<IMessengerResponse>))) return null;
+                //First parameter must have type User
+                ParameterInfo[] paramInfos = method.GetParameters();
+
+                if (paramInfos.Length == 0 || paramInfos[0].ParameterType != typeof(User))
+                {
+                    logger.LogError("Failed to register command \"{Command}\": The first parameter must be of type User.", method.Name);
+                    return null;
+                }
+                //Ensure other parameters can be parsed
+                for (int x = 1; x < paramInfos.Length; ++x)
+                {
+                    if (!TryAddConverter(paramInfos[x].ParameterType))
+                    {
+                        logger.LogError("Failed to register command \"{Command}\": Parameters of type {ParamType} are not allowed.", method.Name, paramInfos[x].ParameterType.Name);
+                        return null;
+                    }
+                }
+                return new CommandAdapter(dialog, method, paramInfos);
+            }
+
+            public Task<IMessengerResponse> InvokeAsync(User user, string[] args, out bool isError)
+            {
+                isError = true;
+                int paramCount = _paramInfos.Length - 1;
+
+                if (args.Length < paramCount)
+                {
+                    switch (paramCount)
+                    {
+                        case 1:
+                            return Task.FromResult(Text("This command requires _one parameter_. Use /help to learn more."));
+
+                        default:
+                            return Task.FromResult(Text("This command requires _" + paramCount + " parameters_. Use /help to learn more."));
+                    }
+                }
+                object[] methodArgs = new object[_paramInfos.Length];
+                methodArgs[0] = user;
+
+                for (int x = 1; x < _paramInfos.Length; ++x)
+                {
+                    try
+                    {
+                        methodArgs[x] = _converters[_paramInfos[x].ParameterType].ConvertFromString(args[0]);
+                    }
+                    catch (ArgumentException)
+                    {
+                        return Task.FromResult(Text("The parameter `" + NormalizeName(_paramInfos[x].Name, " ") + "` has invalid data. Use /help to learn more."));
+                    }
+                }
+                isError = false;
+                object res = _method.Invoke(_dialog, methodArgs);
+                return res is Task<IMessengerResponse> t ? t : Task.FromResult((IMessengerResponse)res);
+            }
+        }
+
         private readonly ILogger _logger;
-        private readonly Dictionary<Type, TypeConverter> _converters;
-        private readonly Dictionary<string, MethodInfo> _commands;
-        private readonly Dictionary<string, MethodInfo> _callbacks;
+        private readonly Dictionary<string, CommandAdapter> _commands;
+        private readonly Dictionary<string, CommandAdapter> _callbacks;
         private readonly Task<IMessengerResponse> _helpText;
-
-        private bool TryAddConverter(Type destinationType)
-        {
-            if (_converters.ContainsKey(destinationType)) return true;
-            TypeConverter converter = TypeDescriptor.GetConverter(destinationType);
-            if (!converter.CanConvertFrom(typeof(string))) return false;
-            _converters.Add(destinationType, converter);
-            return true;
-        }
-
-        private string NormalizeName(string name, string separator = "_")
-        {
-            name = Regex.Replace(name, "(^|[a-z])[A-Z]", m => m.Length == 1 ? char.ToLower(m.Value[0]).ToString() : m.Value[0] + separator + char.ToLower(m.Value[1]));
-            if (name.EndsWith("async")) name = name.Substring(0, name.Length - 6);
-            return name;
-        }
-
-        private Task<IMessengerResponse> Pack(object response)
-        {
-            return response is Task<IMessengerResponse> t ? t : Task.FromResult((IMessengerResponse)response);
-        }
-
-        private Task<IMessengerResponse> InvokeMethodAsync(MethodInfo method, User user, string[] args, out bool isError)
-        {
-            isError = true;
-            ParameterInfo[] paramInfos = method.GetParameters();
-            int paramCount = paramInfos.Length - 1;
-
-            if (args.Length < paramCount)
-            {
-                switch (paramCount)
-                {
-                    case 1:
-                        return Task.FromResult(Text("This command requires _one parameter_. Use /help to learn more."));
-
-                    default:
-                        return Task.FromResult(Text("This command requires _" + paramCount + " parameters_. Use /help to learn more."));
-                }
-            }
-            object[] methodArgs = new object[paramInfos.Length];
-            methodArgs[0] = user;
-
-            for (int x = 1; x < paramInfos.Length; ++x)
-            {
-                try
-                {
-                    methodArgs[x] = _converters[paramInfos[x].ParameterType].ConvertFromString(args[0]);
-                }
-                catch (ArgumentException)
-                {
-                    return Task.FromResult(Text("The parameter `" + NormalizeName(paramInfos[x].Name, "_") + "` has invalid data. Use /help to learn more."));
-                }
-            }
-            isError = false;
-            object res = method.Invoke(this, methodArgs);
-            return res is Task<IMessengerResponse> t ? t : Task.FromResult((IMessengerResponse)res);
-        }
 
         public AbstractDispatchingDialog(ILogger<AbstractDispatchingDialog> logger)
         {
             _logger = logger;
-            _converters = new Dictionary<Type, TypeConverter>();
-            _commands = new Dictionary<string, MethodInfo>();
-            _callbacks = new Dictionary<string, MethodInfo>();
+            _commands = new Dictionary<string, CommandAdapter>();
+            _callbacks = new Dictionary<string, CommandAdapter>();
             StringBuilder helpTextBuilder = new StringBuilder();
             helpTextBuilder.AppendLine("These are all available commands:");
             //Public instance methods, which are directly declared in a subclass
@@ -90,54 +155,22 @@ namespace TelegramBotTemplate.Services
 
             foreach (MethodInfo method in allMethodInfos)
             {
-                //Has return type IMessengerResponse or Task<IMessengerResponse> and does not override something
-                if (method.IsVirtual || (method.ReturnType != typeof(IMessengerResponse) && method.ReturnType != typeof(Task<IMessengerResponse>))) continue;
-                //First parameter must have type User
-                ParameterInfo[] paramInfos = method.GetParameters();
-                bool paramValidationError = false;
+                CommandAdapter adapter = CommandAdapter.TryCreateCommandAdapter(this, logger, method);
+                if (adapter == null) continue;
 
-                if (paramInfos.Length == 0 || paramInfos[0].ParameterType != typeof(User))
-                {
-                    paramValidationError = true;
-                    logger.LogError("Failed to register command \"{Command}\": The first parameter must be of type User.", method.Name);
-                }
-                //Ensure other parameters can be parsed
-                for (int x = 1; x < paramInfos.Length; ++x)
-                {
-                    if (!TryAddConverter(paramInfos[x].ParameterType))
-                    {
-                        paramValidationError = true;
-                        logger.LogError("Failed to register command \"{Command}\": Parameters of type {ParamType} are not allowed.", method.Name, paramInfos[x].ParameterType.Name);
-                    }
-                }
-                if (paramValidationError) continue;
-
-                //Normalize method name
-                string name = NormalizeName(method.Name);
-
-                if (name.EndsWith("callback"))
+                if (adapter.IsCallback)
                 {
                     //Add callback to dispatcher
-                    name = name.Substring(0, name.Length - 9);
-                    _callbacks.Add(name, method);
+                    _callbacks.Add(adapter.Name, adapter);
                 }
                 else
                 {
                     //Add command to dispatcher
-                    _commands.Add(name, method);
+                    _commands.Add(adapter.Name, adapter);
 
-                    if (name != "start")
+                    if (adapter.Name != "start")
                     {
-                        //Generate help text for command
-                        helpTextBuilder.Append('/').Append(name.Replace("_", "\\_"));
-
-                        for (int x = 1; x < paramInfos.Length; ++x)
-                        {
-                            helpTextBuilder.Append(" <").Append(NormalizeName(paramInfos[x].Name, " ")).Append('>');
-                        }
-                        DescriptionAttribute description = method.GetCustomAttribute<DescriptionAttribute>();
-                        if (description != null) helpTextBuilder.Append(" - ").Append(description.Description);
-                        helpTextBuilder.AppendLine();
+                        helpTextBuilder.AppendLine(adapter.HelpText);
                     }
                 }
             }
@@ -151,22 +184,22 @@ namespace TelegramBotTemplate.Services
             {
                 return _helpText;
             }
-            if (_commands.TryGetValue(command, out MethodInfo method))
+            if (_commands.TryGetValue(command, out CommandAdapter method))
             {
-                return InvokeMethodAsync(method, user, args, out _);
+                return method.InvokeAsync(user, args, out _);
             }
             return Task.FromResult(Text("Unrecognized command. You can use /help to show all available commands."));
         }
 
         public override Task<IMessengerResponse> HandleCallbackAsync(User user, string command, string[] args)
         {
-            command = NormalizeName(command);
+            command = CommandAdapter.NormalizeName(command);
             if (command.EndsWith("callback")) command = command.Substring(0, command.Length - 9);
 
-            if (_callbacks.TryGetValue(command, out MethodInfo method))
+            if (_callbacks.TryGetValue(command, out CommandAdapter method))
             {
                 bool isError;
-                var res = InvokeMethodAsync(method, user, args, out isError);
+                var res = method.InvokeAsync(user, args, out isError);
 
                 if (isError)
                     _logger.LogWarning("Failed to invoke callback \"{Callback}\": {Message} Args: {Args}", method.Name, res.Result, string.Join(';', args));
