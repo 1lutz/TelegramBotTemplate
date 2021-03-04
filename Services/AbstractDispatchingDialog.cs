@@ -59,75 +59,94 @@ namespace TelegramBotTemplate.Services
                 return name;
             }
 
+            private static Expression CreateErrorMessage(string s)
+            {
+                return Expression.Call(
+                    typeof(Tuple), "Create", new[] { typeof(Task<IMessengerResponse>), typeof(bool) },
+                    new Expression[] {
+                        Expression.Call(
+                            typeof(Task), "FromResult", new [] {typeof(IMessengerResponse) },
+                            Expression.New(
+                                typeof(TextMessageResponse).GetConstructor(new[] { typeof(string), typeof(Keyboard), typeof(bool) }),
+                                Expression.Constant(s),
+                                Expression.Constant(null, typeof(Keyboard)),
+                                Expression.Constant(false)
+                            )
+                        ),
+                        Expression.Constant(true)
+                    }
+                );
+            }
+
             private Func<User, string[], Tuple<Task<IMessengerResponse>, bool>> GenerateExecutor()
             {
                 ParameterExpression paramUser = Expression.Parameter(typeof(User), "user");
                 ParameterExpression paramArgs = Expression.Parameter(typeof(string[]), "args");
-                Expression[] parsedArgs = new Expression[_paramInfos.Length];
-                parsedArgs[0] = paramUser;
+
+                ParameterExpression[] methodArgs = new ParameterExpression[_paramInfos.Length];
+                methodArgs[0] = paramUser;
 
                 for (int x = 1; x < _paramInfos.Length; ++x)
                 {
-                    Expression getter = Expression.ArrayIndex(paramArgs, Expression.Constant(x - 1));
-
-                    if (_paramInfos[x].ParameterType != typeof(string))
-                    {
-                        getter = Expression.Call(
-                            _paramInfos[x].ParameterType.GetMethod("Parse", new[] { typeof(string) }),
-                            getter
-                        );
-                    }
-                    parsedArgs[x] = getter;
+                    methodArgs[x] = Expression.Variable(_paramInfos[x].ParameterType, "arg" + x);
                 }
                 Expression caller = Expression.Call(
                     Expression.Constant(_dialog),
                     _method,
-                    parsedArgs
+                    methodArgs
                 );
 
                 if (_method.ReturnType != typeof(Task<IMessengerResponse>))
                 {
                     caller = Expression.Call(
-                        typeof(Task).GetMethod("FromResult").MakeGenericMethod(typeof(IMessengerResponse)),
+                        typeof(Task), "FromResult", new[] { typeof(IMessengerResponse) },
                         caller
                     );
                 }
-                Expression wrappedInTuple = Expression.Call(
+                caller = Expression.Call(
                     typeof(Tuple), "Create", new[] { typeof(Task<IMessengerResponse>), typeof(bool) },
                     new[] { caller, Expression.Constant(false) }
                 );
                 int paramCount = _paramInfos.Length - 1;
-                Expression validatedArgCount;
 
-                if (paramCount == 0)
+                if (paramCount > 0)
                 {
-                    validatedArgCount = wrappedInTuple;
-                }
-                else
-                {
-                    string errorMessage = "This command requires _" + (paramCount == 1 ? "one parameter" : paramCount + " parameters") + "_. Use /help to learn more.";
-                    validatedArgCount = Expression.Condition(
+                    LabelTarget returnTarget = Expression.Label(typeof(Tuple<Task<IMessengerResponse>, bool>));
+                    Expression[] blocks = new Expression[_paramInfos.Length + 1];
+                    blocks[0] = Expression.IfThen(
                         Expression.LessThan(Expression.ArrayLength(paramArgs), Expression.Constant(paramCount)),
-                        Expression.Call(
-                            typeof(Tuple), "Create", new[] { typeof(Task<IMessengerResponse>), typeof(bool) },
-                            new Expression[] {
-                                    Expression.Call(
-                                        typeof(Task).GetMethod("FromResult").MakeGenericMethod(typeof(IMessengerResponse)),
-                                        Expression.New(
-                                            typeof(TextMessageResponse).GetConstructor(new[] { typeof(string), typeof(Keyboard), typeof(bool) }),
-                                            Expression.Constant(errorMessage),
-                                            Expression.Constant(null, typeof(Keyboard)),
-                                            Expression.Constant(false)
-                                        )
-                                    ),
-                                    Expression.Constant(true)
-                            }
-                        ),
-                        wrappedInTuple
+                        Expression.Return(returnTarget, CreateErrorMessage(
+                            "This command requires _" + (paramCount == 1 ? "one parameter" : paramCount + " parameters") + "_. Use /help to learn more."
+                        ))
                     );
+                    blocks[_paramInfos.Length] = Expression.Label(returnTarget, caller);
+
+                    for (int x = 1; x < _paramInfos.Length; ++x)
+                    {
+                        ParameterInfo p = _paramInfos[x];
+
+                        if (p.ParameterType == typeof(string))
+                        {
+                            blocks[x] = Expression.Assign(methodArgs[x], Expression.ArrayIndex(paramArgs, Expression.Constant(x - 1)));
+                        }
+                        else
+                        {
+                            blocks[x] = Expression.IfThen(
+                                Expression.Not(
+                                    Expression.Call(p.ParameterType, "TryParse", null, Expression.ArrayIndex(paramArgs, Expression.Constant(x - 1)), methodArgs[x])
+                                ),
+                                Expression.Return(returnTarget, CreateErrorMessage(
+                                    "The parameter `" + _paramNames[x] + "` has invalid data. Use /help to learn more."
+                                ))
+                            );
+                        }
+                    }
+                    ParameterExpression[] toParse = new ParameterExpression[paramCount];
+                    Array.Copy(methodArgs, 1, toParse, 0, paramCount);
+                    caller = Expression.Block(toParse, blocks);
                 }
                 var lambda = Expression.Lambda<Func<User, string[], Tuple<Task<IMessengerResponse>, bool>>>(
-                    validatedArgCount,
+                    caller,
                     paramUser,
                     paramArgs
                 );
